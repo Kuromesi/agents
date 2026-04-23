@@ -19,6 +19,7 @@ package sidecarutils
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/yaml"
 
 	agentsv1alpha1 "github.com/openkruise/agents/api/v1alpha1"
 	"github.com/openkruise/agents/pkg/sandbox-manager/consts"
@@ -44,6 +46,15 @@ func enableInjectCsiMountConfig(sandbox *agentsv1alpha1.Sandbox) bool {
 func enableInjectAgentRuntimeConfig(sandbox *agentsv1alpha1.Sandbox) bool {
 	for _, runtime := range sandbox.Spec.Runtimes {
 		if runtime.Name == agentsv1alpha1.RuntimeConfigForInjectAgentRuntime {
+			return true
+		}
+	}
+	return false
+}
+
+func enableInjectEgressControlConfig(sandbox *agentsv1alpha1.Sandbox) bool {
+	for _, runtime := range sandbox.Spec.Runtimes {
+		if runtime.Name == agentsv1alpha1.RuntimeConfigForInjectEgressControl {
 			return true
 		}
 	}
@@ -77,12 +88,48 @@ func parseInjectConfig(ctx context.Context, configKey string, configRaw map[stri
 		return sidecarConfig, nil
 	}
 
-	err := json.Unmarshal([]byte(configRaw[configKey]), &sidecarConfig)
+	var err error
+	if strings.HasPrefix(configValue, "{") || strings.HasPrefix(configValue, "[") {
+		err = json.Unmarshal([]byte(configValue), &sidecarConfig)
+	} else {
+		err = yaml.Unmarshal([]byte(configValue), &sidecarConfig)
+	}
+
 	if err != nil {
 		log.Error(err, "failed to unmarshal sidecar config", "configKey", configKey)
 		return sidecarConfig, err
 	}
 	return sidecarConfig, nil
+}
+
+func setEgressControlContainer(ctx context.Context, podSpec *corev1.PodSpec, config SidecarInjectConfig) {
+	log := logf.FromContext(ctx)
+
+	// set main container, the first container is the main container
+	if len(podSpec.Containers) == 0 {
+		log.Info("no container found in sidecar template")
+		return
+	}
+
+	if podSpec.InitContainers == nil {
+		podSpec.InitContainers = make([]corev1.Container, 0, 2)
+	}
+	for _, csiSidecar := range config.Sidecars {
+		podSpec.InitContainers = append(podSpec.InitContainers, csiSidecar)
+	}
+
+	// set share volume
+	if len(config.Volumes) > 0 {
+		if podSpec.Volumes == nil {
+			podSpec.Volumes = make([]corev1.Volume, 0, len(config.Volumes))
+		}
+		for _, vol := range config.Volumes {
+			if findVolumeByName(podSpec.Volumes, vol.Name) {
+				continue
+			}
+			podSpec.Volumes = append(podSpec.Volumes, vol)
+		}
+	}
 }
 
 // setCSIMountContainer injects CSI mount configurations into the SandboxTemplate's pod spec.

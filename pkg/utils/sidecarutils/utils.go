@@ -29,7 +29,7 @@ import (
 
 func InjectPodTemplateCSIAndRuntimeSidecar(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, podSpec *corev1.PodSpec, cli client.Client) error {
 	logger := logf.FromContext(ctx).WithValues("sandbox", klog.KObj(sandbox))
-	if !enableInjectCsiMountConfig(sandbox) && !enableInjectAgentRuntimeConfig(sandbox) {
+	if !enableInjectCsiMountConfig(sandbox) && !enableInjectAgentRuntimeConfig(sandbox) && !enableInjectEgressControlConfig(sandbox) {
 		return nil
 	}
 	// fetch the custom injection configuration
@@ -63,6 +63,17 @@ func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, po
 		}
 		if !isContainersExists(podSpec.InitContainers, csiInjectConfig.Sidecars) && !isContainersExists(podSpec.Containers, csiInjectConfig.Sidecars) {
 			setCSIMountContainer(ctx, podSpec, csiInjectConfig)
+		}
+	}
+
+	if enableInjectEgressControlConfig(sandbox) {
+		egressInjectConfig, err := parseInjectConfig(ctx, KEY_EGRESS_CONTROL_INJECTION_CONFIG, injectConfigMap)
+		if err != nil {
+			logger.Error(err, "failed to parse egress control injection configuration")
+			return err
+		}
+		if !isContainersExists(podSpec.InitContainers, egressInjectConfig.Sidecars) && !isContainersExists(podSpec.Containers, egressInjectConfig.Sidecars) {
+			setEgressControlContainer(ctx, podSpec, egressInjectConfig)
 		}
 	}
 	return nil

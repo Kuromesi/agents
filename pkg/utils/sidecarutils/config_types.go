@@ -34,5 +34,11 @@ type SidecarInjectConfig struct {
 	// Support injection for multiple independent sidecar containers; CSI container plugins are all injected from this
 	Sidecars []corev1.Container `json:"csiSidecar" yaml:"csiSidecar"`
 	// Support injection for volume mount configurations
-	Volumes []corev1.Volume `json:"volume" yaml:"volume"`
+	Volume []corev1.Volume `json:"volume" yaml:"volume"`
+
+	Containers []corev1.Container `json:"containers" yaml:"containers"`
+
+	InitContainers []corev1.Container `json:"initContainers" yaml:"initContainers"`
+
+	Volumes []corev1.Volume `json:"volumeMounts" yaml:"volumeMounts"`
 }

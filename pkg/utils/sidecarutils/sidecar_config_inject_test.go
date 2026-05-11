@@ -76,7 +76,7 @@ func TestSetCSIMountContainer(t *testing.T) {
 						Image: "csi-agent:latest",
 					},
 				},
-				Volumes: []corev1.Volume{
+				Volume: []corev1.Volume{
 					{Name: "mount-root", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 					{Name: "nas-plugin-dir", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 					{Name: "oss-plugin-dir", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
@@ -110,7 +110,7 @@ func TestSetCSIMountContainer(t *testing.T) {
 				Sidecars: []corev1.Container{
 					{Name: "csi-sidecar", Image: "csi-sidecar:latest"},
 				},
-				Volumes: []corev1.Volume{
+				Volume: []corev1.Volume{
 					{Name: "mount-root", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 					{Name: "new-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				},
@@ -142,7 +142,7 @@ func TestSetCSIMountContainer(t *testing.T) {
 					},
 				},
 				Sidecars: []corev1.Container{},
-				Volumes:  []corev1.Volume{},
+				Volume:   []corev1.Volume{},
 			},
 			expectedContainers:     1,
 			expectedInitContainers: 0,
@@ -160,7 +160,7 @@ func TestSetCSIMountContainer(t *testing.T) {
 					Env: []corev1.EnvVar{{Name: "ENV1", Value: "value1"}},
 				},
 				Sidecars: []corev1.Container{{Name: "sidecar", Image: "sidecar:latest"}},
-				Volumes:  []corev1.Volume{{Name: "vol1", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}},
+				Volume:   []corev1.Volume{{Name: "vol1", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}},
 			},
 			expectedContainers:     0, // no change when containers list is empty
 			expectedInitContainers: 0, // sidecars not injected when no main container
@@ -778,7 +778,7 @@ func TestParseCSIMountConfig(t *testing.T) {
 				Sidecars: []corev1.Container{
 					{Name: "csi-sidecar", Image: "csi:latest"},
 				},
-				Volumes: []corev1.Volume{
+				Volume: []corev1.Volume{
 					{Name: "vol1", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				},
 			},
@@ -792,7 +792,7 @@ func TestParseCSIMountConfig(t *testing.T) {
 			expectedConfig: SidecarInjectConfig{
 				MainContainer: corev1.Container{},
 				Sidecars:      []corev1.Container{},
-				Volumes:       []corev1.Volume{},
+				Volume:        []corev1.Volume{},
 			},
 			expectError: false,
 		},
@@ -824,7 +824,7 @@ func TestParseCSIMountConfig(t *testing.T) {
 				Sidecars: []corev1.Container{
 					{Name: "sidecar1", Image: "img1"},
 				},
-				Volumes: []corev1.Volume{},
+				Volume: []corev1.Volume{},
 			},
 			expectError: false,
 		},
@@ -918,7 +918,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 						Command: []string{"sh", "/workspace/entrypoint_inner.sh"},
 					},
 				},
-				Volumes: []corev1.Volume{
+				Volume: []corev1.Volume{
 					{Name: "envd-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				},
 			},
@@ -932,7 +932,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 			expectedConfig: SidecarInjectConfig{
 				MainContainer: corev1.Container{},
 				Sidecars:      []corev1.Container{},
-				Volumes:       []corev1.Volume{},
+				Volume:        []corev1.Volume{},
 			},
 			expectError: false,
 		},
@@ -944,7 +944,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 			expectedConfig: SidecarInjectConfig{
 				MainContainer: corev1.Container{},
 				Sidecars:      nil,
-				Volumes:       nil,
+				Volume:        nil,
 			},
 			expectError:   false,
 			errorContains: "",
@@ -977,7 +977,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 					},
 				},
 				Sidecars: []corev1.Container{},
-				Volumes:  []corev1.Volume{},
+				Volume:   []corev1.Volume{},
 			},
 			expectError: false,
 		},
@@ -1009,7 +1009,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 					},
 				},
 				Sidecars: []corev1.Container{},
-				Volumes:  []corev1.Volume{},
+				Volume:   []corev1.Volume{},
 			},
 			expectError: false,
 		},
@@ -1041,7 +1041,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 func compareSidecarInjectConfigs(a, b SidecarInjectConfig) bool {
 	return reflect.DeepEqual(a.MainContainer, b.MainContainer) &&
 		reflect.DeepEqual(a.Sidecars, b.Sidecars) &&
-		reflect.DeepEqual(a.Volumes, b.Volumes)
+		reflect.DeepEqual(a.Volume, b.Volume)
 }
 
 func TestIsContainersExists(t *testing.T) {

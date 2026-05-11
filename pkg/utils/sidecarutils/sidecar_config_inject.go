@@ -119,11 +119,11 @@ func setEgressControlContainer(ctx context.Context, podSpec *corev1.PodSpec, con
 	}
 
 	// set share volume
-	if len(config.Volumes) > 0 {
+	if len(config.Volume) > 0 {
 		if podSpec.Volumes == nil {
-			podSpec.Volumes = make([]corev1.Volume, 0, len(config.Volumes))
+			podSpec.Volumes = make([]corev1.Volume, 0, len(config.Volume))
 		}
-		for _, vol := range config.Volumes {
+		for _, vol := range config.Volume {
 			if findVolumeByName(podSpec.Volumes, vol.Name) {
 				continue
 			}
@@ -157,11 +157,11 @@ func setCSIMountContainer(ctx context.Context, podSpec *corev1.PodSpec, config S
 	}
 
 	// set share volume
-	if len(config.Volumes) > 0 {
+	if len(config.Volume) > 0 {
 		if podSpec.Volumes == nil {
-			podSpec.Volumes = make([]corev1.Volume, 0, len(config.Volumes))
+			podSpec.Volumes = make([]corev1.Volume, 0, len(config.Volume))
 		}
-		for _, vol := range config.Volumes {
+		for _, vol := range config.Volume {
 			if findVolumeByName(podSpec.Volumes, vol.Name) {
 				continue
 			}
@@ -217,7 +217,7 @@ func setAgentRuntimeContainer(ctx context.Context, podSpec *corev1.PodSpec, conf
 	mainContainer := &podSpec.Containers[0]
 	setMainContainerConfigWhenInjectRuntimeSidecar(ctx, mainContainer, config)
 
-	podSpec.Volumes = append(podSpec.Volumes, config.Volumes...)
+	podSpec.Volumes = append(podSpec.Volumes, config.Volume...)
 }
 
 func setMainContainerConfigWhenInjectRuntimeSidecar(ctx context.Context, mainContainer *corev1.Container, config SidecarInjectConfig) {

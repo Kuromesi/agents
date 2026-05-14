@@ -61,11 +61,16 @@ type SandboxControl interface {
 	EnsureSandboxTerminated(ctx context.Context, args EnsureFuncArgs) error
 }
 
+type RuntimeController interface {
+	InjectRuntime(context.Context, *agentsv1alpha1.Sandbox, *corev1.Pod) (*corev1.Pod, error)
+}
+
 type SandboxControlArgs struct {
-	Client      client.Client
-	APIReader   client.Reader
-	Recorder    record.EventRecorder
-	RateLimiter *RateLimiter
+	Client            client.Client
+	APIReader         client.Reader
+	Recorder          record.EventRecorder
+	RateLimiter       *RateLimiter
+	RuntimeController RuntimeController
 }
 
 func NewSandboxControl(args SandboxControlArgs) map[string]SandboxControl {

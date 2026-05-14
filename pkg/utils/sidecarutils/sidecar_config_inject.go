@@ -52,6 +52,50 @@ func enableInjectAgentRuntimeConfig(sandbox *agentsv1alpha1.Sandbox) bool {
 	return false
 }
 
+// InjectPodTemplateCSIAndRuntimeSidecar is the entry point for sidecar injection.
+// It fetches the injection configuration from the ConfigMap and applies sidecar
+// containers, volumes, and main container modifications to the pod spec template.
+func InjectPodTemplateCSIAndRuntimeSidecar(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, podSpec *corev1.PodSpec, cli client.Client) error {
+	if len(sandbox.Spec.Runtimes) == 0 {
+		return nil
+	}
+
+	injectConfigMap, err := fetchInjectionConfiguration(ctx, cli)
+	if err != nil {
+		return err
+	}
+
+	return doSidecarInjection(ctx, sandbox, podSpec, injectConfigMap)
+}
+
+// doSidecarInjection parses the injection configuration and applies sidecar containers,
+// volumes, and main container modifications to the pod spec template.
+func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, podSpec *corev1.PodSpec, injectConfigMap map[string]string) error {
+	if enableInjectAgentRuntimeConfig(sandbox) {
+		runtimeConfig, err := parseInjectConfig(ctx, KEY_RUNTIME_INJECTION_CONFIG, injectConfigMap)
+		if err != nil {
+			return err
+		}
+		if !isContainersExists(podSpec.InitContainers, runtimeConfig.Sidecars) &&
+			!isContainersExists(podSpec.Containers, runtimeConfig.Sidecars) {
+			setAgentRuntimeContainer(ctx, podSpec, &runtimeConfig)
+		}
+	}
+
+	if enableInjectCsiMountConfig(sandbox) {
+		csiConfig, err := parseInjectConfig(ctx, KEY_CSI_INJECTION_CONFIG, injectConfigMap)
+		if err != nil {
+			return err
+		}
+		if !isContainersExists(podSpec.InitContainers, csiConfig.Sidecars) &&
+			!isContainersExists(podSpec.Containers, csiConfig.Sidecars) {
+			setCSIMountContainer(ctx, podSpec, &csiConfig)
+		}
+	}
+
+	return nil
+}
+
 func enableInjectEgressControlConfig(sandbox *agentsv1alpha1.Sandbox) bool {
 	for _, runtime := range sandbox.Spec.Runtimes {
 		if runtime.Name == agentsv1alpha1.RuntimeConfigForInjectEgressControl {
@@ -136,7 +180,7 @@ func setEgressControlContainer(ctx context.Context, podSpec *corev1.PodSpec, con
 // It configures the main container (first container in the spec) with CSI sidecar settings,
 // appends additional CSI sidecar containers, and mounts shared volumes.
 // Volumes are only added if they don't already exist in the template.
-func setCSIMountContainer(ctx context.Context, podSpec *corev1.PodSpec, config SidecarInjectConfig) {
+func setCSIMountContainer(ctx context.Context, podSpec *corev1.PodSpec, config *SidecarInjectConfig) {
 	log := logf.FromContext(ctx)
 
 	// set main container, the first container is the main container
@@ -172,7 +216,7 @@ func setCSIMountContainer(ctx context.Context, podSpec *corev1.PodSpec, config S
 
 // setMainContainerWhenInjectCSISidecar configures the main container with environment variables and volume mounts from the CSI sidecar configuration.
 // It appends environment variables and volume mounts to the main container, skipping any that already exist (matched by name) to avoid duplicates.
-func setMainContainerWhenInjectCSISidecar(mainContainer *corev1.Container, config SidecarInjectConfig) {
+func setMainContainerWhenInjectCSISidecar(mainContainer *corev1.Container, config *SidecarInjectConfig) {
 	// append some envs in main container when processing csi mount
 	if mainContainer.Env == nil {
 		mainContainer.Env = make([]corev1.EnvVar, 0, 1)
@@ -201,7 +245,7 @@ func setMainContainerWhenInjectCSISidecar(mainContainer *corev1.Container, confi
 // setAgentRuntimeContainer injects agent runtime configurations into the SandboxTemplate's pod spec.
 // It appends agent runtime containers as init containers and configures the main container (first container) with runtime settings.
 // The init containers run before the main containers to prepare the runtime environment.
-func setAgentRuntimeContainer(ctx context.Context, podSpec *corev1.PodSpec, config SidecarInjectConfig) {
+func setAgentRuntimeContainer(ctx context.Context, podSpec *corev1.PodSpec, config *SidecarInjectConfig) {
 	log := logf.FromContext(ctx)
 
 	// append init agent runtime container
@@ -220,7 +264,7 @@ func setAgentRuntimeContainer(ctx context.Context, podSpec *corev1.PodSpec, conf
 	podSpec.Volumes = append(podSpec.Volumes, config.Volume...)
 }
 
-func setMainContainerConfigWhenInjectRuntimeSidecar(ctx context.Context, mainContainer *corev1.Container, config SidecarInjectConfig) {
+func setMainContainerConfigWhenInjectRuntimeSidecar(ctx context.Context, mainContainer *corev1.Container, config *SidecarInjectConfig) {
 	log := logf.FromContext(ctx)
 
 	// Check if main container already has a valid postStart hook (with actual handler)

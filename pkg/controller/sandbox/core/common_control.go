@@ -35,7 +35,6 @@ import (
 	"github.com/openkruise/agents/pkg/utils"
 	"github.com/openkruise/agents/pkg/utils/expectations"
 	"github.com/openkruise/agents/pkg/utils/inplaceupdate"
-	"github.com/openkruise/agents/pkg/utils/sidecarutils"
 )
 
 const CommonControlName = "common"
@@ -55,6 +54,7 @@ type commonControl struct {
 	rateLimiter          *RateLimiter
 	lifecycleHookFunc    LifecycleHookFunc
 	initializer          SandboxInitializer
+	runtimeController    RuntimeController
 }
 
 func NewCommonControl(args SandboxControlArgs) SandboxControl {
@@ -69,6 +69,7 @@ func NewCommonControl(args SandboxControlArgs) SandboxControl {
 			apiReader:       args.APIReader,
 			storageRegistry: storages.NewStorageProvider(),
 		},
+		runtimeController: args.RuntimeController,
 	}
 	return control
 }
@@ -402,11 +403,10 @@ func (r *commonControl) createPod(ctx context.Context, box *agentsv1alpha1.Sandb
 
 	// to avoid the performance issue, using the controller to inject csi containers
 	// fetch the configmap and parse the configuration based on the controller runtime
-	podTemplate := &pod.Spec
-	injectErr := sidecarutils.InjectPodTemplateCSIAndRuntimeSidecar(ctx, box, podTemplate, r.Client)
-	if injectErr != nil {
-		klog.ErrorS(injectErr, "failed to inject pod template with csi sidecar or runtime sidecar", "sandbox", klog.KObj(box))
-		return nil, injectErr
+	pod, err = r.runtimeController.InjectRuntime(ctx, box, pod)
+	if err != nil {
+		klog.ErrorS(err, "failed to inject pod template with csi sidecar or runtime sidecar", "sandbox", klog.KObj(box))
+		return nil, err
 	}
 
 	ScaleExpectation.ExpectScale(GetControllerKey(box), expectations.Create, box.Name)

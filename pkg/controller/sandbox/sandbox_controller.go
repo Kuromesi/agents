@@ -45,6 +45,7 @@ import (
 	"github.com/openkruise/agents/pkg/utils"
 	"github.com/openkruise/agents/pkg/utils/expectations"
 	utilfeature "github.com/openkruise/agents/pkg/utils/feature"
+	"github.com/openkruise/agents/pkg/utils/sidecarutils"
 )
 
 func init() {
@@ -61,18 +62,27 @@ func Add(mgr manager.Manager) error {
 		return nil
 	}
 
+	sandboxRuntimeController, err := sidecarutils.NewRuntimeController(mgr.GetConfig(), mgr.GetCache())
+	if err != nil {
+		return err
+	}
+
+	if err := mgr.Add(sandboxRuntimeController); err != nil {
+		return err
+	}
+
 	rateLimiter := core.NewRateLimiter()
-	err := (&SandboxReconciler{
+	if err := (&SandboxReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		controls: core.NewSandboxControl(core.SandboxControlArgs{
-			Client:      mgr.GetClient(),
-			APIReader:   mgr.GetAPIReader(),
-			Recorder:    mgr.GetEventRecorderFor("sandbox"),
-			RateLimiter: rateLimiter,
+			Client:            mgr.GetClient(),
+			APIReader:         mgr.GetAPIReader(),
+			Recorder:          mgr.GetEventRecorderFor("sandbox"),
+			RateLimiter:       rateLimiter,
+			RuntimeController: sandboxRuntimeController,
 		}), rateLimiter: rateLimiter,
-	}).SetupWithManager(mgr)
-	if err != nil {
+	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	klog.Infof("Started SandboxReconciler successfully")

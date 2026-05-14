@@ -17,6 +17,8 @@ limitations under the License.
 package sidecarutils
 
 import (
+	"encoding/json"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -36,9 +38,8 @@ type SidecarInjectConfig struct {
 	// Support injection for volume mount configurations
 	Volume []corev1.Volume `json:"volume" yaml:"volume"`
 
-	Containers []corev1.Container `json:"containers" yaml:"containers"`
+	Template json.RawMessage `json:"template" yaml:"template"`
 
-	InitContainers []corev1.Container `json:"initContainers" yaml:"initContainers"`
-
-	Volumes []corev1.Volume `json:"volumeMounts" yaml:"volumeMounts"`
+	templatePod *corev1.Pod
+	raw         string
 }

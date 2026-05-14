@@ -172,7 +172,7 @@ func TestSetCSIMountContainer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setCSIMountContainer(ctx, tt.template, tt.config)
+			setCSIMountContainer(ctx, tt.template, &tt.config)
 
 			// Verify main container count
 			if len(tt.template.Containers) != tt.expectedContainers {
@@ -403,7 +403,7 @@ func TestSetAgentRuntimeContainer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setAgentRuntimeContainer(ctx, tt.template, tt.config)
+			setAgentRuntimeContainer(ctx, tt.template, &tt.config)
 
 			// Verify init container count
 			if len(tt.template.InitContainers) != tt.expectedInitContainers {
@@ -525,7 +525,7 @@ func TestSetMainContainerWhenInjectCSISidecar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setMainContainerWhenInjectCSISidecar(tt.mainContainer, tt.config)
+			setMainContainerWhenInjectCSISidecar(tt.mainContainer, &tt.config)
 
 			// Verify env count
 			if len(tt.mainContainer.Env) != tt.expectedEnvCount {
@@ -708,7 +708,7 @@ func TestSetMainContainerConfigWhenInjectRuntimeSidecar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setMainContainerConfigWhenInjectRuntimeSidecar(context.TODO(), tt.mainContainer, tt.config)
+			setMainContainerConfigWhenInjectRuntimeSidecar(context.TODO(), tt.mainContainer, &tt.config)
 
 			// Verify env count
 			if len(tt.mainContainer.Env) != tt.expectedEnvCount {

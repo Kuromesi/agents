@@ -21,17 +21,28 @@ import (
 )
 
 const (
-	KEY_CSI_INJECTION_CONFIG     = "csi"
-	KEY_RUNTIME_INJECTION_CONFIG = "agent-runtime"
-	SandboxInjectionConfigName   = "sandbox-injection-config"
+	KEY_CSI_INJECTION_CONFIG            = "csi"
+	KEY_EGRESS_CONTROL_INJECTION_CONFIG = "egress-control"
+	KEY_RUNTIME_INJECTION_CONFIG        = "agent-runtime"
+
+	SandboxInjectionConfigName = "sandbox-injection-config"
 )
 
 type SidecarInjectConfig struct {
 	// Configuration injection for the main container (by convention, one container is designated as the main container)
 	// Injection configuration items for business-specified main containers, such as volumeMount, environment variables, etc. Format: corev1.Container
-	MainContainer corev1.Container `json:"mainContainer"`
+	MainContainer corev1.Container `json:"mainContainer" yaml:"mainContainer"`
 	// Support injection for multiple independent sidecar containers; CSI container plugins are all injected from this
-	Sidecars []corev1.Container `json:"csiSidecar"`
+	Sidecars []corev1.Container `json:"csiSidecar" yaml:"csiSidecar"`
 	// Support injection for volume mount configurations
-	Volumes []corev1.Volume `json:"volume"`
+	Volumes []corev1.Volume `json:"volume" yaml:"volume"`
+
+	// Annotations to be added to the pod.
+	Annotations map[string]string `json:"annotations" yaml:"annotations"`
+	// Labels to be added to the pod.
+	Labels map[string]string `json:"labels" yaml:"labels"`
+	// InitContainers to be appended to the pod spec.
+	InitContainers []corev1.Container `json:"initContainers" yaml:"initContainers"`
+	// Containers to be appended to the pod spec.
+	Containers []corev1.Container `json:"containers" yaml:"containers"`
 }

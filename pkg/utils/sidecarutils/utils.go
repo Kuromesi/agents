@@ -25,9 +25,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentsv1alpha1 "github.com/openkruise/agents/api/v1alpha1"
+	egresscontrol "github.com/openkruise/agents/pkg/utils/sidecarutils/egress-control"
 )
 
-func InjectPodTemplateCSIAndRuntimeSidecar(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, podSpec *corev1.PodSpec, cli client.Client) error {
+func InjectPodTemplateCSIAndRuntimeSidecar(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, podSpec *corev1.Pod, cli client.Client) error {
 	logger := logf.FromContext(ctx).WithValues("sandbox", klog.KObj(sandbox))
 	if !enableInjectCsiMountConfig(sandbox) && !enableInjectAgentRuntimeConfig(sandbox) {
 		return nil
@@ -41,7 +42,7 @@ func InjectPodTemplateCSIAndRuntimeSidecar(ctx context.Context, sandbox *agentsv
 	return doSidecarInjection(ctx, sandbox, podSpec, config)
 }
 
-func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, podSpec *corev1.PodSpec, injectConfigMap map[string]string) error {
+func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, pod *corev1.Pod, injectConfigMap map[string]string) error {
 	logger := logf.FromContext(ctx).WithValues("sandbox", klog.KObj(sandbox))
 	// set agent runtime sidecar config
 	if enableInjectAgentRuntimeConfig(sandbox) {
@@ -50,8 +51,8 @@ func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, po
 			logger.Error(err, "failed to parse agent runtime injection configuration")
 			return err
 		}
-		if !isContainersExists(podSpec.InitContainers, runTimeInjectConfig.Sidecars) && !isContainersExists(podSpec.Containers, runTimeInjectConfig.Sidecars) {
-			setAgentRuntimeContainer(ctx, podSpec, runTimeInjectConfig)
+		if !isContainersExists(pod.Spec.InitContainers, runTimeInjectConfig.Sidecars) && !isContainersExists(pod.Spec.Containers, runTimeInjectConfig.Sidecars) {
+			setAgentRuntimeContainer(ctx, &pod.Spec, runTimeInjectConfig)
 		}
 	}
 	// set csi sidecar config
@@ -61,9 +62,27 @@ func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, po
 			logger.Error(err, "failed to parse csi injection configuration")
 			return err
 		}
-		if !isContainersExists(podSpec.InitContainers, csiInjectConfig.Sidecars) && !isContainersExists(podSpec.Containers, csiInjectConfig.Sidecars) {
-			setCSIMountContainer(ctx, podSpec, csiInjectConfig)
+		if !isContainersExists(pod.Spec.InitContainers, csiInjectConfig.Sidecars) && !isContainersExists(pod.Spec.Containers, csiInjectConfig.Sidecars) {
+			setCSIMountContainer(ctx, &pod.Spec, csiInjectConfig)
 		}
 	}
+
+	// Egress Control may rewrite health probes, so it should be injected after other sidecars.
+	if enableInjectEgressControlConfig(sandbox) {
+		egressControlInjectConfig, err := parseInjectConfig(ctx, KEY_EGRESS_CONTROL_INJECTION_CONFIG, injectConfigMap)
+		if err != nil {
+			logger.Error(err, "failed to parse egress control injection configuration")
+			return err
+		}
+		if !isContainersExists(pod.Spec.InitContainers, egressControlInjectConfig.Sidecars) && !isContainersExists(pod.Spec.Containers, egressControlInjectConfig.InitContainers) {
+			applyInjectionTemplate(ctx, pod, egressControlInjectConfig)
+		}
+
+		if err := egresscontrol.ApplyHealthProbeRewrite(pod); err != nil {
+			logger.Error(err, "failed to apply health probe rewrite")
+			return err
+		}
+	}
+
 	return nil
 }

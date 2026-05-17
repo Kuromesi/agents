@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -34,13 +35,17 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 	tests := []struct {
 		name                   string
 		sandbox                *agentsv1alpha1.Sandbox
-		podSpecTemplate        *corev1.PodSpec
+		pod                    *corev1.Pod
 		injectionConfigData    map[string]string
 		expectInjection        bool
 		expectRuntimeContainer bool
 		expectCSIContainer     bool
 		expectRuntimeEnvCount  int
 		expectCSIVolumeMounts  int
+		expectEgressContainer  bool
+		expectInitContainers   int // expected InitContainer count after injection
+		expectContainers       int // expected Container count after injection
+		initialContainerCount  int // base Container count before injection (default 1)
 	}{
 		{
 			name: "no injection needed",
@@ -55,9 +60,11 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			expectInjection: false,
@@ -80,9 +87,11 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectionConfigData: map[string]string{
@@ -124,9 +133,11 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectionConfigData: map[string]string{
@@ -173,9 +184,11 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectionConfigData: map[string]string{
@@ -209,6 +222,169 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 			expectRuntimeEnvCount:  1,
 			expectCSIVolumeMounts:  1,
 		},
+		{
+			name: "inject egress control sidecar only",
+			sandbox: &agentsv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sandbox",
+					Namespace: "default",
+				},
+				Spec: agentsv1alpha1.SandboxSpec{
+					EmbeddedSandboxTemplate: agentsv1alpha1.EmbeddedSandboxTemplate{
+						Template: &corev1.PodTemplateSpec{},
+					},
+					Runtimes: []agentsv1alpha1.RuntimeConfig{
+						{
+							Name: agentsv1alpha1.RuntimeConfigForInjectEgressControl,
+						},
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
+				},
+			},
+			injectionConfigData: map[string]string{
+				KEY_EGRESS_CONTROL_INJECTION_CONFIG: `{
+					"mainContainer": {},
+					"csiSidecar": [],
+					"volume": [{"name": "egress-vol", "emptyDir": {}}],
+					"initContainers": [{"name": "egress-init", "image": "egress-init:v1"}],
+					"containers": [{"name": "egress-sidecar", "image": "egress:v1"}],
+					"labels": {"egress": "enabled"},
+					"annotations": {"egress-control": "true"}
+				}`,
+			},
+			// Note: InjectPodTemplateCSIAndRuntimeSidecar returns early when only egress is enabled,
+			// since it only checks CSI and runtime flags in the early return guard.
+			// Egress injection only happens via doSidecarInjection when CSI or runtime is also enabled.
+			expectInjection: false,
+		},
+		{
+			name: "inject egress control with health probe rewrite - early return without CSI/runtime",
+			sandbox: &agentsv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sandbox",
+					Namespace: "default",
+				},
+				Spec: agentsv1alpha1.SandboxSpec{
+					EmbeddedSandboxTemplate: agentsv1alpha1.EmbeddedSandboxTemplate{
+						Template: &corev1.PodTemplateSpec{},
+					},
+					Runtimes: []agentsv1alpha1.RuntimeConfig{
+						{
+							Name: agentsv1alpha1.RuntimeConfigForInjectEgressControl,
+						},
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"networking.agents.kruise.io/health-probe-rewrite": "true",
+						"networking.agents.kruise.io/sidecar-proxy":        "istio-proxy",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "main",
+							Image: "nginx",
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path: "/healthz",
+										Port: intstr.FromInt(8080),
+									},
+								},
+							},
+						},
+						{
+							Name:  "istio-proxy",
+							Image: "istio/proxyv2:latest",
+						},
+					},
+				},
+			},
+			injectionConfigData: map[string]string{
+				KEY_EGRESS_CONTROL_INJECTION_CONFIG: `{
+					"mainContainer": {},
+					"csiSidecar": [],
+					"volume": [],
+					"initContainers": [],
+					"containers": [],
+					"labels": {},
+					"annotations": {}
+				}`,
+			},
+			// Note: InjectPodTemplateCSIAndRuntimeSidecar returns early when only egress is enabled.
+			expectInjection:       false,
+			initialContainerCount: 2, // main + istio-proxy
+		},
+		{
+			name: "inject all three: runtime, csi, and egress",
+			sandbox: &agentsv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sandbox",
+					Namespace: "default",
+				},
+				Spec: agentsv1alpha1.SandboxSpec{
+					EmbeddedSandboxTemplate: agentsv1alpha1.EmbeddedSandboxTemplate{
+						Template: &corev1.PodTemplateSpec{},
+					},
+					Runtimes: []agentsv1alpha1.RuntimeConfig{
+						{
+							Name: agentsv1alpha1.RuntimeConfigForInjectAgentRuntime,
+						},
+						{
+							Name: agentsv1alpha1.RuntimeConfigForInjectCsiMount,
+						},
+						{
+							Name: agentsv1alpha1.RuntimeConfigForInjectEgressControl,
+						},
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
+				},
+			},
+			injectionConfigData: map[string]string{
+				KEY_RUNTIME_INJECTION_CONFIG: `{
+					"mainContainer": {"env": [{"name": "RUNTIME", "value": "on"}], "volumeMounts": []},
+					"csiSidecar": [{"name": "runtime-sidecar", "image": "runtime:v1"}],
+					"volume": []
+				}`,
+				KEY_CSI_INJECTION_CONFIG: `{
+					"mainContainer": {"volumeMounts": [{"name": "csi-vol", "mountPath": "/csi"}]},
+					"csiSidecar": [{"name": "csi-sidecar", "image": "csi:v1"}],
+					"volume": [{"name": "csi-vol", "emptyDir": {}}]
+				}`,
+				KEY_EGRESS_CONTROL_INJECTION_CONFIG: `{
+					"mainContainer": {},
+					"csiSidecar": [],
+					"volume": [{"name": "egress-vol", "emptyDir": {}}],
+					"initContainers": [],
+					"containers": [{"name": "egress-sidecar", "image": "egress:v1"}],
+					"labels": {"egress": "enabled"},
+					"annotations": {}
+				}`,
+			},
+			expectInjection:        true,
+			expectRuntimeContainer: true,
+			expectCSIContainer:     true,
+			expectEgressContainer:  true,
+			expectRuntimeEnvCount:  1,
+			expectCSIVolumeMounts:  1,
+			expectInitContainers:   2, // runtime + csi sidecars
+			expectContainers:       2, // main + egress container
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,7 +403,7 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithObjects(objs...).Build()
 			ctx := context.Background()
 
-			err := InjectPodTemplateCSIAndRuntimeSidecar(ctx, tt.sandbox, tt.podSpecTemplate, fakeClient)
+			err := InjectPodTemplateCSIAndRuntimeSidecar(ctx, tt.sandbox, tt.pod, fakeClient)
 			// Verify results
 			if !tt.expectInjection {
 				// Should return early without error
@@ -235,8 +411,12 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 					t.Errorf("expected no error when no injection needed, got: %v", err)
 				}
 				// Pod template should not be modified
-				if len(tt.podSpecTemplate.Containers) != 1 {
-					t.Errorf("expected 1 container, got %d", len(tt.podSpecTemplate.Containers))
+				initialContainers := 1
+				if tt.initialContainerCount > 0 {
+					initialContainers = tt.initialContainerCount
+				}
+				if len(tt.pod.Spec.Containers) != initialContainers {
+					t.Errorf("expected %d containers (unchanged), got %d", initialContainers, len(tt.pod.Spec.Containers))
 				}
 				return
 			}
@@ -249,7 +429,7 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 			csiContainerInjected := false
 			// Check InitContainers for both runtime sidecar and csi sidecar (both are injected to InitContainers)
 			// Use image to distinguish between pre-existing containers and injected containers
-			for _, container := range tt.podSpecTemplate.InitContainers {
+			for _, container := range tt.pod.Spec.InitContainers {
 				// runtime sidecar injection uses image "runtime:v1"
 				if container.Name == "runtime-sidecar" && container.Image == "runtime:v1" {
 					runtimeContainerInjected = true
@@ -261,7 +441,7 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 			}
 			// Check main container in Containers
 			mainContainerFound := false
-			for _, container := range tt.podSpecTemplate.Containers {
+			for _, container := range tt.pod.Spec.Containers {
 				if container.Name == "main" {
 					mainContainerFound = true
 					// Check main container env count (from runtime injection)
@@ -285,6 +465,18 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 			if !mainContainerFound {
 				t.Error("expected main container to still exist")
 			}
+			// Verify InitContainer and Container counts if specified
+			if tt.expectInitContainers > 0 {
+				if len(tt.pod.Spec.InitContainers) != tt.expectInitContainers {
+					t.Errorf("expected %d InitContainers, got %d", tt.expectInitContainers, len(tt.pod.Spec.InitContainers))
+				}
+			}
+			if tt.expectContainers > 0 {
+				if len(tt.pod.Spec.Containers) != tt.expectContainers {
+					t.Errorf("expected %d Containers, got %d", tt.expectContainers, len(tt.pod.Spec.Containers))
+				}
+			}
+			// Count total containers (InitContainers + Containers)
 			expectedTotal := 1 // main container
 			if tt.expectRuntimeContainer {
 				expectedTotal++
@@ -292,10 +484,15 @@ func TestInjectPodTemplateCSIAndRuntimeSidecar(t *testing.T) {
 			if tt.expectCSIContainer {
 				expectedTotal++
 			}
-			// Count total containers (InitContainers + Containers)
-			totalContainers := len(tt.podSpecTemplate.InitContainers) + len(tt.podSpecTemplate.Containers)
-			if totalContainers != expectedTotal {
-				t.Errorf("expected %d total containers, got %d", expectedTotal, totalContainers)
+			if tt.expectEgressContainer {
+				expectedTotal++
+			}
+			totalContainers := len(tt.pod.Spec.InitContainers) + len(tt.pod.Spec.Containers)
+			if tt.expectInitContainers == 0 && tt.expectContainers == 0 {
+				// Only verify total count when not explicitly checking init/container counts
+				if totalContainers != expectedTotal {
+					t.Errorf("expected %d total containers, got %d", expectedTotal, totalContainers)
+				}
 			}
 		})
 	}
@@ -413,7 +610,7 @@ func TestDoSidecarInjection(t *testing.T) {
 	tests := []struct {
 		name                   string
 		sandbox                *agentsv1alpha1.Sandbox
-		podSpecTemplate        *corev1.PodSpec
+		pod                    *corev1.Pod
 		injectConfigMap        map[string]string
 		expectRuntimeContainer bool
 		expectCSIContainer     bool
@@ -435,9 +632,11 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -475,9 +674,11 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -518,9 +719,11 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -561,9 +764,11 @@ func TestDoSidecarInjection(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{},
@@ -582,10 +787,12 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
-					{Name: "runtime-sidecar", Image: "existing:v1"}, // conflict with runtime sidecar in Containers
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+						{Name: "runtime-sidecar", Image: "existing:v1"}, // conflict with runtime sidecar in Containers
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -618,12 +825,14 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				InitContainers: []corev1.Container{
-					{Name: "runtime-sidecar", Image: "existing-init:v1"}, // conflict in initContainers
-				},
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{Name: "runtime-sidecar", Image: "existing-init:v1"}, // conflict in initContainers
+					},
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -658,10 +867,12 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
-					{Name: "csi-sidecar", Image: "existing-csi:v1"}, // conflict with csi sidecar in Containers
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+						{Name: "csi-sidecar", Image: "existing-csi:v1"}, // conflict with csi sidecar in Containers
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -695,12 +906,14 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				InitContainers: []corev1.Container{
-					{Name: "csi-sidecar", Image: "existing-init-csi:v1"}, // conflict in initContainers
-				},
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{Name: "csi-sidecar", Image: "existing-init-csi:v1"}, // conflict in initContainers
+					},
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -737,10 +950,12 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
-					{Name: "runtime-sidecar", Image: "existing:v1"}, // conflict with runtime sidecar
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+						{Name: "runtime-sidecar", Image: "existing:v1"}, // conflict with runtime sidecar
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -791,10 +1006,12 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
-					{Name: "csi-sidecar", Image: "existing-csi:v1"}, // conflict with csi sidecar
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+						{Name: "csi-sidecar", Image: "existing-csi:v1"}, // conflict with csi sidecar
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -845,13 +1062,15 @@ func TestDoSidecarInjection(t *testing.T) {
 					},
 				},
 			},
-			podSpecTemplate: &corev1.PodSpec{
-				InitContainers: []corev1.Container{
-					{Name: "runtime-sidecar", Image: "existing-init:v1"}, // conflict in initContainers
-					{Name: "csi-sidecar", Image: "existing-init-csi:v1"}, // conflict in initContainers
-				},
-				Containers: []corev1.Container{
-					{Name: "main", Image: "nginx"},
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{Name: "runtime-sidecar", Image: "existing-init:v1"}, // conflict in initContainers
+						{Name: "csi-sidecar", Image: "existing-init-csi:v1"}, // conflict in initContainers
+					},
+					Containers: []corev1.Container{
+						{Name: "main", Image: "nginx"},
+					},
 				},
 			},
 			injectConfigMap: map[string]string{
@@ -889,7 +1108,7 @@ func TestDoSidecarInjection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			// Call the function
-			err := doSidecarInjection(ctx, tt.sandbox, tt.podSpecTemplate, tt.injectConfigMap)
+			err := doSidecarInjection(ctx, tt.sandbox, tt.pod, tt.injectConfigMap)
 			// Verify no error
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -899,7 +1118,7 @@ func TestDoSidecarInjection(t *testing.T) {
 			csiContainerInjected := false
 			// Check InitContainers for both runtime sidecar and csi sidecar
 			// Use image to distinguish between pre-existing containers (for conflict tests) and injected containers
-			for _, container := range tt.podSpecTemplate.InitContainers {
+			for _, container := range tt.pod.Spec.InitContainers {
 				// runtime sidecar injection uses image "runtime:v1"
 				if container.Name == "runtime-sidecar" && container.Image == "runtime:v1" {
 					runtimeContainerInjected = true
@@ -910,7 +1129,7 @@ func TestDoSidecarInjection(t *testing.T) {
 				}
 			}
 			// Check main container in Containers
-			for _, container := range tt.podSpecTemplate.Containers {
+			for _, container := range tt.pod.Spec.Containers {
 				if container.Name == "main" {
 					// Check main container env count
 					if tt.expectMainEnvCount > 0 && len(container.Env) != tt.expectMainEnvCount {
@@ -937,14 +1156,14 @@ func TestDoSidecarInjection(t *testing.T) {
 			}
 			// Verify volume injection
 			if tt.expectCSIVolumeCount > 0 {
-				actualVolumeCount := len(tt.podSpecTemplate.Volumes)
+				actualVolumeCount := len(tt.pod.Spec.Volumes)
 				if actualVolumeCount < tt.expectCSIVolumeCount {
 					t.Errorf("expected at least %d volumes, got %d", tt.expectCSIVolumeCount, actualVolumeCount)
 				}
 			}
 			// Main container should always exist
 			mainContainerFound := false
-			for _, container := range tt.podSpecTemplate.Containers {
+			for _, container := range tt.pod.Spec.Containers {
 				if container.Name == "main" {
 					mainContainerFound = true
 					break

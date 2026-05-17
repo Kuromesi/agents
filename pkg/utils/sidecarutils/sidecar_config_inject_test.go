@@ -812,7 +812,7 @@ func TestParseCSIMountConfig(t *testing.T) {
 			},
 			expectedConfig: SidecarInjectConfig{},
 			expectError:    true,
-			errorContains:  "invalid character",
+			errorContains:  "unmarshal",
 		},
 		{
 			name: "partial config with only sidecars",
@@ -956,7 +956,7 @@ func TestParseAgentRuntimeConfig(t *testing.T) {
 			},
 			expectedConfig: SidecarInjectConfig{},
 			expectError:    true,
-			errorContains:  "invalid character",
+			errorContains:  "unmarshal",
 		},
 		{
 			name: "partial config with only main container env",

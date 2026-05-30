@@ -49,20 +49,12 @@ func InjectSandboxRuntimes(ctx context.Context, sandbox *agentsv1alpha1.Sandbox,
 	return doSidecarInjection(ctx, sandbox, pod, config)
 }
 
-func extractRuntimes(sandbox *agentsv1alpha1.Sandbox) []string {
-	runtimes := []string{}
-	for _, runtime := range sandbox.Spec.Runtimes {
-		runtimes = append(runtimes, runtime.Name)
-	}
-	return runtimes
-}
-
 func doSidecarInjection(ctx context.Context, sandbox *agentsv1alpha1.Sandbox, pod *corev1.Pod, injectConfigMap map[string]string) error {
 	logger := logf.FromContext(ctx)
 
-	runtimes := extractRuntimes(sandbox)
 	injectedRuntimes := sets.NewString()
-	for _, runtime := range runtimes {
+	for _, r := range sandbox.Spec.Runtimes {
+		runtime := r.Name
 		if injectedRuntimes.Has(runtime) {
 			logger.V(5).Info("skipping duplicate runtime, already processed", "runtime", runtime)
 			continue

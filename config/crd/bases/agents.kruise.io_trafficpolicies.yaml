@@ -16,7 +16,14 @@ spec:
     singular: trafficpolicy
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.priority
+      name: Priority
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: TrafficPolicy defines bidirectional traffic rules for selected
@@ -57,15 +64,11 @@ spec:
                         that direction.
                       properties:
                         action:
-                          allOf:
-                          - enum:
-                            - allow
-                            - deny
-                          - enum:
-                            - allow
-                            - deny
                           description: Action determines whether matched traffic is
                             allowed or denied.
+                          enum:
+                          - allow
+                          - deny
                           type: string
                         from:
                           description: From lists source peers. Multiple entries are
@@ -254,15 +257,11 @@ spec:
                         that direction.
                       properties:
                         action:
-                          allOf:
-                          - enum:
-                            - allow
-                            - deny
-                          - enum:
-                            - allow
-                            - deny
                           description: Action determines whether matched traffic is
                             allowed or denied.
+                          enum:
+                          - allow
+                          - deny
                           type: string
                         from:
                           description: From lists source peers. Multiple entries are
@@ -449,8 +448,9 @@ spec:
               selector:
                 description: |-
                   Selector chooses the pods this policy applies to. Standard
-                  LabelSelector semantics: an EMPTY selector matches EVERY pod in the
-                  namespace.
+                  LabelSelector semantics: an EMPTY selector matches EVERY pod within
+                  the policy's scope (namespace for TrafficPolicy, cluster-wide for
+                  GlobalTrafficPolicy).
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -498,6 +498,9 @@ spec:
             required:
             - selector
             type: object
+            x-kubernetes-validations:
+            - message: at least one of ingress or egress must be specified
+              rule: has(self.ingress) || has(self.egress)
           status:
             description: TrafficPolicyStatus captures the observed state of TrafficPolicy.
             properties:

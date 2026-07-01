@@ -20,16 +20,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EgressRuleAction controls whether matched traffic is permitted or dropped.
+// RuleAction controls whether matched traffic is permitted or dropped.
 //
 // +kubebuilder:validation:Enum=allow;deny
-type EgressRuleAction string
+type RuleAction string
 
 const (
-	// EgressRuleActionAllow permits the matched traffic.
-	EgressRuleActionAllow EgressRuleAction = "allow"
-	// EgressRuleActionDeny drops the matched traffic.
-	EgressRuleActionDeny EgressRuleAction = "deny"
+	// RuleActionAllow permits the matched traffic.
+	RuleActionAllow RuleAction = "allow"
+	// RuleActionDeny drops the matched traffic.
+	RuleActionDeny RuleAction = "deny"
 )
 
 // TrafficPolicyServiceRef references a Kubernetes Service by name and
@@ -119,9 +119,7 @@ type TrafficPolicyPort struct {
 // that direction.
 type TrafficPolicyRule struct {
 	// Action determines whether matched traffic is allowed or denied.
-	//
-	// +kubebuilder:validation:Enum=allow;deny
-	Action EgressRuleAction `json:"action"`
+	Action RuleAction `json:"action"`
 	// From lists source peers. Multiple entries are ORed.
 	//
 	// +optional
@@ -152,6 +150,8 @@ type TrafficPolicyDirection struct {
 }
 
 // TrafficPolicySpec defines bidirectional policy state on selected pods.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.ingress) || has(self.egress)",message="at least one of ingress or egress must be specified"
 type TrafficPolicySpec struct {
 	// Priority determines the evaluation order when multiple TrafficPolicies
 	// match the same pod. Higher values are evaluated first. When two
@@ -163,8 +163,9 @@ type TrafficPolicySpec struct {
 	Priority int32 `json:"priority,omitempty"`
 
 	// Selector chooses the pods this policy applies to. Standard
-	// LabelSelector semantics: an EMPTY selector matches EVERY pod in the
-	// namespace.
+	// LabelSelector semantics: an EMPTY selector matches EVERY pod within
+	// the policy's scope (namespace for TrafficPolicy, cluster-wide for
+	// GlobalTrafficPolicy).
 	Selector metav1.LabelSelector `json:"selector"`
 
 	// Ingress defines rules applied to inbound traffic of selected pods.
@@ -177,13 +178,14 @@ type TrafficPolicySpec struct {
 	Egress *TrafficPolicyDirection `json:"egress,omitempty"`
 }
 
+// TrafficPolicyConditionType represents a standard condition type for
+// TrafficPolicy status reporting.
+type TrafficPolicyConditionType string
+
 // Standard TrafficPolicy condition types.
 const (
 	// TrafficPolicyConditionAccepted indicates the spec passed validation.
-	TrafficPolicyConditionAccepted = "Accepted"
-	// TrafficPolicyConditionProgrammed indicates the compiled nftables rules
-	// are installed on all matching nodes.
-	TrafficPolicyConditionProgrammed = "Programmed"
+	TrafficPolicyConditionAccepted TrafficPolicyConditionType = "Accepted"
 )
 
 // TrafficPolicyStatus captures the observed state of TrafficPolicy.
@@ -197,9 +199,12 @@ type TrafficPolicyStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=tp
+// +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=".spec.priority"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 //
 // TrafficPolicy defines bidirectional traffic rules for selected pods.
 type TrafficPolicy struct {
@@ -223,9 +228,13 @@ type TrafficPolicyList struct {
 	Items           []TrafficPolicy `json:"items"`
 }
 
+// +genclient
+// +genclient:nonNamespaced
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=gtp
+// +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=".spec.priority"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 //
 // GlobalTrafficPolicy defines bidirectional traffic rules cluster-wide.
 type GlobalTrafficPolicy struct {

@@ -22,14 +22,14 @@ import (
 
 // RuleAction controls whether matched traffic is permitted or dropped.
 //
-// +kubebuilder:validation:Enum=allow;deny
+// +kubebuilder:validation:Enum=allow;reject
 type RuleAction string
 
 const (
 	// RuleActionAllow permits the matched traffic.
 	RuleActionAllow RuleAction = "allow"
-	// RuleActionDeny drops the matched traffic.
-	RuleActionDeny RuleAction = "deny"
+	// RuleActionReject reject the matched traffic.
+	RuleActionReject RuleAction = "reject"
 )
 
 // TrafficPolicyServiceRef references a Kubernetes Service by name and
@@ -114,7 +114,7 @@ type TrafficPolicyPort struct {
 }
 
 // TrafficPolicyRule is one entry in the ordered rule list. Each rule
-// specifies an action (allow/deny) and optional peer and port constraints.
+// specifies an action (allow/reject) and optional peer and port constraints.
 // When From/To/Ports are all empty, the action applies to all traffic in
 // that direction.
 type TrafficPolicyRule struct {

@@ -59,7 +59,7 @@ spec:
                     items:
                       description: |-
                         TrafficPolicyRule is one entry in the ordered rule list. Each rule
-                        specifies an action (allow/deny) and optional peer and port constraints.
+                        specifies an action (allow/reject) and optional peer and port constraints.
                         When From/To/Ports are all empty, the action applies to all traffic in
                         that direction.
                       properties:
@@ -68,7 +68,7 @@ spec:
                             allowed or denied.
                           enum:
                           - allow
-                          - deny
+                          - reject
                           type: string
                         from:
                           description: From lists source peers. Multiple entries are
@@ -252,7 +252,7 @@ spec:
                     items:
                       description: |-
                         TrafficPolicyRule is one entry in the ordered rule list. Each rule
-                        specifies an action (allow/deny) and optional peer and port constraints.
+                        specifies an action (allow/reject) and optional peer and port constraints.
                         When From/To/Ports are all empty, the action applies to all traffic in
                         that direction.
                       properties:
@@ -261,7 +261,7 @@ spec:
                             allowed or denied.
                           enum:
                           - allow
-                          - deny
+                          - reject
                           type: string
                         from:
                           description: From lists source peers. Multiple entries are

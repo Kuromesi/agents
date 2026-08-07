@@ -258,6 +258,7 @@ type SecretCredentialRef struct {
 	// Namespace is the Secret namespace. When omitted, a SecurityProfile uses
 	// its own namespace and a GlobalSecurityProfile uses the selected Pod's
 	// namespace.
+	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Namespace string `json:"namespace,omitempty"`
@@ -271,6 +272,7 @@ type CredentialProviderRef struct {
 	Name string `json:"name"`
 	// Namespace is reserved for namespace-scoped provider lookup. It is
 	// currently ignored.
+	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Namespace string `json:"namespace,omitempty"`

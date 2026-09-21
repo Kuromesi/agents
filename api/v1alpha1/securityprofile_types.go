@@ -218,6 +218,19 @@ const (
 	CredentialRefKindCredentialProvider CredentialRefKind = "CredentialProvider" // #nosec G101 -- not a credential
 )
 
+// ExtensionProviderRef references a named provider in the serving EPE's
+// effective EPEConfig. The consuming action determines the required provider
+// kind. It is not a Kubernetes object reference and does not use the profile
+// namespace.
+type ExtensionProviderRef struct {
+	// Name identifies an entry in EPEConfig's extensionProviders.
+	// It is required and has no default.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	Name string `json:"name"`
+}
+
 // CredentialRef identifies the credential source for a token transformation.
 // Exactly one typed source, or the deprecated Kind and Name fields, must be
 // set. Typed and deprecated fields must not be combined.
@@ -438,17 +451,6 @@ type HTTPCalloutPhase struct {
 	Body bool `json:"body,omitempty"`
 }
 
-// HTTPCalloutProviderRef references an HTTP callout provider in the serving
-// EPE's configuration, not the profile namespace.
-type HTTPCalloutProviderRef struct {
-	// Name is the name of an httpCallout entry in EPEConfig's
-	// extensionProviders. It is required and has no default.
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
-	Name string `json:"name"`
-}
-
 // HTTPCalloutAction delegates request or response processing to a named HTTP
 // callout provider. At least one phase must be enabled.
 // +kubebuilder:validation:XValidation:rule="has(self.request) || has(self.response)",message="at least one of request or response must be set"
@@ -457,7 +459,7 @@ type HTTPCalloutAction struct {
 	// URL, timeout, TLS, and decision-response size limit. A missing, unavailable,
 	// or wrong-type provider is an execution failure handled by FailStrategy;
 	// no other provider is used as a fallback.
-	ProviderRef HTTPCalloutProviderRef `json:"providerRef"`
+	ProviderRef ExtensionProviderRef `json:"providerRef"`
 	// Request enables a callout before the request is forwarded upstream.
 	// +optional
 	Request *HTTPCalloutPhase `json:"request,omitempty"`

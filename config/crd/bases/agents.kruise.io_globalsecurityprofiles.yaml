@@ -477,7 +477,7 @@ spec:
                             immediate response or a fail-closed error occurs. For example:
 
                                 httpCallout:
-                                  providerRef:
+                                  provider:
                                     name: content-scanner
                                   request:
                                     headers:
@@ -509,9 +509,9 @@ spec:
                               maximum: 8388608
                               minimum: 1
                               type: integer
-                            providerRef:
+                            provider:
                               description: |-
-                                ProviderRef identifies the HTTP callout provider. The provider owns the
+                                Provider identifies the HTTP callout provider. The provider owns the
                                 URL, timeout, TLS, and decision-response size limit. A missing, unavailable,
                                 or wrong-type provider is an execution failure handled by FailStrategy;
                                 no other provider is used as a fallback.
@@ -651,7 +651,7 @@ spec:
                                       self.mode == 'DenyList')
                               type: object
                           required:
-                          - providerRef
+                          - provider
                           type: object
                           x-kubernetes-validations:
                           - message: at least one of request or response must be set

@@ -455,11 +455,11 @@ type HTTPCalloutPhase struct {
 // callout provider. At least one phase must be enabled.
 // +kubebuilder:validation:XValidation:rule="has(self.request) || has(self.response)",message="at least one of request or response must be set"
 type HTTPCalloutAction struct {
-	// ProviderRef identifies the HTTP callout provider. The provider owns the
+	// Provider identifies the HTTP callout provider. The provider owns the
 	// URL, timeout, TLS, and decision-response size limit. A missing, unavailable,
 	// or wrong-type provider is an execution failure handled by FailStrategy;
 	// no other provider is used as a fallback.
-	ProviderRef ExtensionProviderRef `json:"providerRef"`
+	Provider ExtensionProviderRef `json:"provider"`
 	// Request enables a callout before the request is forwarded upstream.
 	// +optional
 	Request *HTTPCalloutPhase `json:"request,omitempty"`
@@ -634,7 +634,7 @@ type SecurityRuleActions struct {
 	// immediate response or a fail-closed error occurs. For example:
 	//
 	//     httpCallout:
-	//       providerRef:
+	//       provider:
 	//         name: content-scanner
 	//       request:
 	//         headers:

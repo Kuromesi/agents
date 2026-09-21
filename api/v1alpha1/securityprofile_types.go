@@ -375,48 +375,33 @@ type TokenTransformationAction struct {
 	ApiKey *ApiKeyConfig `json:"apiKey,omitempty"`
 }
 
-// ExternalProcessingBodyMode determines whether EPE sends a phase body to an
-// external processor.
-// +kubebuilder:validation:Enum=Never;Always
-type ExternalProcessingBodyMode string
-
-const (
-	// ExternalProcessingBodyModeNever invokes the processor without buffering
-	// or disclosing the body.
-	ExternalProcessingBodyModeNever ExternalProcessingBodyMode = "Never"
-	// ExternalProcessingBodyModeAlways buffers and discloses the complete body
-	// before invoking the processor.
-	ExternalProcessingBodyModeAlways ExternalProcessingBodyMode = "Always"
-)
-
-// ExternalProcessingHeaderMode selects which headers EPE sends to an external
-// processor.
+// HTTPCalloutHeaderMode selects which headers EPE sends to a callout provider.
 // +kubebuilder:validation:Enum=None;All;AllowList;DenyList
-type ExternalProcessingHeaderMode string
+type HTTPCalloutHeaderMode string
 
 const (
-	// ExternalProcessingHeaderModeNone sends no headers. Routing metadata such
-	// as the authority and path remains part of the processor invocation.
-	ExternalProcessingHeaderModeNone ExternalProcessingHeaderMode = "None"
-	// ExternalProcessingHeaderModeAll sends every header, including credentials
+	// HTTPCalloutHeaderModeNone sends no headers. Request metadata such as
+	// authority, path, and content type remains part of the invocation.
+	HTTPCalloutHeaderModeNone HTTPCalloutHeaderMode = "None"
+	// HTTPCalloutHeaderModeAll sends every header, including credentials
 	// and cookies.
-	ExternalProcessingHeaderModeAll ExternalProcessingHeaderMode = "All"
-	// ExternalProcessingHeaderModeAllowList sends only explicitly listed
-	// headers.
-	ExternalProcessingHeaderModeAllowList ExternalProcessingHeaderMode = "AllowList"
-	// ExternalProcessingHeaderModeDenyList sends every header except explicitly
-	// listed headers.
-	ExternalProcessingHeaderModeDenyList ExternalProcessingHeaderMode = "DenyList"
+	HTTPCalloutHeaderModeAll HTTPCalloutHeaderMode = "All"
+	// HTTPCalloutHeaderModeAllowList sends only explicitly listed headers.
+	HTTPCalloutHeaderModeAllowList HTTPCalloutHeaderMode = "AllowList"
+	// HTTPCalloutHeaderModeDenyList sends every header except explicitly
+	// listed headers, including credentials unless explicitly excluded.
+	HTTPCalloutHeaderModeDenyList HTTPCalloutHeaderMode = "DenyList"
 )
 
-// ExternalProcessingHeaders configures header disclosure for one processing
-// phase. EPE validates that the selected mode and list fields agree when it
-// compiles the profile.
-type ExternalProcessingHeaders struct {
+// HTTPCalloutHeaders configures header disclosure for one callout phase.
+// A list is required for its corresponding mode and forbidden for other modes.
+// +kubebuilder:validation:XValidation:rule="has(self.allowList) == (has(self.mode) && self.mode == 'AllowList')",message="allowList is required only when mode is AllowList"
+// +kubebuilder:validation:XValidation:rule="has(self.denyList) == (has(self.mode) && self.mode == 'DenyList')",message="denyList is required only when mode is DenyList"
+type HTTPCalloutHeaders struct {
 	// Mode selects which headers are sent. Defaults to None.
 	// +optional
 	// +kubebuilder:default:=None
-	Mode ExternalProcessingHeaderMode `json:"mode,omitempty"`
+	Mode HTTPCalloutHeaderMode `json:"mode,omitempty"`
 	// AllowList names the only headers sent when Mode is AllowList. Header
 	// names are case-insensitive.
 	// +optional
@@ -437,68 +422,65 @@ type ExternalProcessingHeaders struct {
 	DenyList []string `json:"denyList,omitempty"`
 }
 
-// ExternalProcessingPhase configures one request or response processing phase.
-// The enclosing field's presence enables the phase.
-type ExternalProcessingPhase struct {
-	// BodyMode controls whether the complete body is buffered and sent.
-	// Defaults to Never.
-	// +optional
-	// +kubebuilder:default:=Never
-	BodyMode ExternalProcessingBodyMode `json:"bodyMode,omitempty"`
+// HTTPCalloutPhase configures one request or response callout. The enclosing
+// field's presence enables the phase; an empty object invokes the provider with
+// metadata only. Omitting the field disables that phase.
+type HTTPCalloutPhase struct {
 	// Headers controls header disclosure. Omission is equivalent to mode None.
 	// +optional
-	Headers *ExternalProcessingHeaders `json:"headers,omitempty"`
+	Headers *HTTPCalloutHeaders `json:"headers,omitempty"`
+	// Body buffers and sends the complete body when true. The callout then
+	// runs after buffering, instead of at the headers phase. Defaults to false.
+	// Bodies must be valid UTF-8 and fit within MaxBodyBytes; they are never
+	// truncated. In the response phase, only the response body is sent.
+	// +optional
+	// +kubebuilder:default:=false
+	Body bool `json:"body,omitempty"`
 }
 
-// ExternalProcessingHTTPBackend identifies an HTTP/JSON processor.
-type ExternalProcessingHTTPBackend struct {
-	// URL is an absolute HTTP or HTTPS endpoint reached from EPE. Custom
-	// backend credentials and TLS settings are not supported.
+// HTTPCalloutProviderRef references an HTTP callout provider in the serving
+// EPE's configuration, not the profile namespace.
+type HTTPCalloutProviderRef struct {
+	// Name is the name of an httpCallout entry in EPEConfig's
+	// extensionProviders. It is required and has no default.
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=2048
-	// +kubebuilder:validation:Pattern=`^https?://`
-	URL string `json:"url"`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	Name string `json:"name"`
 }
 
-// ExternalProcessingBackend selects the processor transport. Version v1alpha1
-// supports HTTP only. EPE rejects an empty backend when compiling the profile.
-type ExternalProcessingBackend struct {
-	// HTTP configures an HTTP/JSON processor.
+// HTTPCalloutAction delegates request or response processing to a named HTTP
+// callout provider. At least one phase must be enabled.
+// +kubebuilder:validation:XValidation:rule="has(self.request) || has(self.response)",message="at least one of request or response must be set"
+type HTTPCalloutAction struct {
+	// ProviderRef identifies the HTTP callout provider. The provider owns the
+	// URL, timeout, TLS, and decision-response size limit. A missing, unavailable,
+	// or wrong-type provider is an execution failure handled by FailStrategy;
+	// no other provider is used as a fallback.
+	ProviderRef HTTPCalloutProviderRef `json:"providerRef"`
+	// Request enables a callout before the request is forwarded upstream.
 	// +optional
-	HTTP *ExternalProcessingHTTPBackend `json:"http,omitempty"`
-}
-
-// ExternalProcessingAction delegates request or response processing to an
-// external service. EPE requires at least one phase when compiling the profile.
-type ExternalProcessingAction struct {
-	// Backend identifies the external processor.
-	Backend ExternalProcessingBackend `json:"backend"`
-	// Timeout limits each processor invocation. Defaults to 500ms. The
-	// effective timeout may be shorter when the enclosing processing phase has
-	// less time remaining.
+	Request *HTTPCalloutPhase `json:"request,omitempty"`
+	// Response enables a callout on the upstream response. Its invocation
+	// includes request correlation metadata, but no request headers or body.
 	// +optional
-	// +kubebuilder:default:="500ms"
-	Timeout *metav1.Duration `json:"timeout,omitempty"`
-	// MaxBodyBytes limits each disclosed request or response body and the
-	// processor response document. Defaults to 1 MiB and may not exceed 8 MiB.
-	// Oversized content fails instead of being truncated.
+	Response *HTTPCalloutPhase `json:"response,omitempty"`
+	// MaxBodyBytes limits each request or response body disclosed to the
+	// provider. Defaults to 1 MiB and may not exceed 8 MiB. Oversized content
+	// is an execution failure, not truncated input. This does not configure
+	// Envoy's buffering limit or the provider's decision-response size limit.
 	// +optional
 	// +kubebuilder:default:=1048576
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=8388608
 	MaxBodyBytes int64 `json:"maxBodyBytes,omitempty"`
-	// FailStrategy controls processor transport, timeout, and protocol errors.
-	// Block fails closed; Allow and Ignore skip this action's mutations and
-	// continue. Defaults to Block.
+	// FailStrategy controls execution failures, including provider lookup,
+	// transport, timeout, body-disclosure, and protocol errors. Defaults to
+	// Block. Allow and Ignore skip the failed callout's mutations and continue.
+	// A valid immediate response from the provider is always honored.
 	// +optional
 	// +kubebuilder:default:=Block
 	FailStrategy FailStrategy `json:"failStrategy,omitempty"`
-	// Request enables processing of the outgoing request when present.
-	// +optional
-	Request *ExternalProcessingPhase `json:"request,omitempty"`
-	// Response enables processing of the upstream response when present.
-	// +optional
-	Response *ExternalProcessingPhase `json:"response,omitempty"`
 }
 
 // AuditBody configures the body sent to an audit webhook. JSON and Text are
@@ -616,7 +598,7 @@ type AuditAction struct {
 
 // SecurityRuleActions defines the actions executed by one matching rule.
 // Actions run in this order: Bypass, Block, MCPToolPolicy,
-// HeaderManipulation, ExternalProcessing, and TokenTransformation. Audit
+// HeaderManipulation, HTTPCallout, and TokenTransformation. Audit
 // actions are emitted asynchronously after the request is resolved.
 //
 // Bypass, Block, and a denying MCPToolPolicy stop the remaining actions and
@@ -645,42 +627,21 @@ type SecurityRuleActions struct {
 	// for credentials.
 	// +optional
 	HeaderManipulation *HeaderManipulationAction `json:"headerManipulation,omitempty"`
-	// ExternalProcessing delegates the request, the upstream response, or both
-	// to an external processor. Non-terminal unless the processor returns an
-	// immediate response or a fail-closed error occurs.
+	// HTTPCallout delegates the request, the upstream response, or both to a
+	// named HTTP callout provider. Non-terminal unless the provider returns an
+	// immediate response or a fail-closed error occurs. For example:
 	//
-	// Examples:
-	//
-	// The following example sends only selected request headers to the external
-	// processor. Because bodyMode is omitted, the request body is not sent:
-	//
-	//     externalProcessing:
-	//       backend:
-	//         http:
-	//           url: https://processor.example.com/v1/process
+	//     httpCallout:
+	//       providerRef:
+	//         name: content-scanner
 	//       request:
 	//         headers:
 	//           mode: AllowList
-	//           allowList:
-	//           - content-type
-	//           - x-request-id
-	//
-	// The following example sends both the request and response bodies and
-	// explicitly configures the processing limits and failure behavior:
-	//
-	//     externalProcessing:
-	//       backend:
-	//         http:
-	//           url: https://processor.example.com/v1/process
-	//       timeout: 1s
-	//       maxBodyBytes: 1048576
+	//           allowList: [content-type, x-request-id]
+	//         body: true
 	//       failStrategy: Block
-	//       request:
-	//         bodyMode: Always
-	//       response:
-	//         bodyMode: Always
 	// +optional
-	ExternalProcessing *ExternalProcessingAction `json:"externalProcessing,omitempty"`
+	HTTPCallout *HTTPCalloutAction `json:"httpCallout,omitempty"`
 	// Audit lists rule-specific audit actions. A non-empty list replaces the
 	// profile-level Audit list for this rule. An empty list inherits the
 	// profile-level list.

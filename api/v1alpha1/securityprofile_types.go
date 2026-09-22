@@ -218,12 +218,9 @@ const (
 	CredentialRefKindCredentialProvider CredentialRefKind = "CredentialProvider" // #nosec G101 -- not a credential
 )
 
-// ExtensionProviderRef references a named provider in the serving EPE's
-// effective EPEConfig. The consuming action determines the required provider
-// kind. It is not a Kubernetes object reference and does not use the profile
-// namespace.
+// ExtensionProviderRef references a named provider.
 type ExtensionProviderRef struct {
-	// Name identifies an entry in EPEConfig's extensionProviders.
+	// Name identifies the provider.
 	// It is required and has no default.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -388,7 +385,7 @@ type TokenTransformationAction struct {
 	ApiKey *ApiKeyConfig `json:"apiKey,omitempty"`
 }
 
-// HTTPCalloutHeaderMode selects which headers EPE sends to a callout provider.
+// HTTPCalloutHeaderMode selects which headers are sent to a callout provider.
 // +kubebuilder:validation:Enum=None;All;AllowList;DenyList
 type HTTPCalloutHeaderMode string
 

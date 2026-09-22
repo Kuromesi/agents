@@ -516,7 +516,7 @@ spec:
                               properties:
                                 name:
                                   description: |-
-                                    Name identifies an entry in EPEConfig's extensionProviders.
+                                    Name identifies the provider.
                                     It is required and has no default.
                                   maxLength: 253
                                   minLength: 1

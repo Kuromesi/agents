@@ -385,35 +385,25 @@ type TokenTransformationAction struct {
 	ApiKey *ApiKeyConfig `json:"apiKey,omitempty"`
 }
 
-// HTTPCalloutHeaderMode selects which headers are sent to a callout provider.
-// +kubebuilder:validation:Enum=None;All;AllowList;DenyList
-type HTTPCalloutHeaderMode string
-
-const (
-	// HTTPCalloutHeaderModeNone sends no headers. Request metadata such as
-	// authority, path, and content type remains part of the invocation.
-	HTTPCalloutHeaderModeNone HTTPCalloutHeaderMode = "None"
-	// HTTPCalloutHeaderModeAll sends every header, including credentials
-	// and cookies.
-	HTTPCalloutHeaderModeAll HTTPCalloutHeaderMode = "All"
-	// HTTPCalloutHeaderModeAllowList sends only explicitly listed headers.
-	HTTPCalloutHeaderModeAllowList HTTPCalloutHeaderMode = "AllowList"
-	// HTTPCalloutHeaderModeDenyList sends every header except explicitly
-	// listed headers, including credentials unless explicitly excluded.
-	HTTPCalloutHeaderModeDenyList HTTPCalloutHeaderMode = "DenyList"
-)
-
 // HTTPCalloutHeaders configures header disclosure for one callout phase.
-// A list is required for its corresponding mode and forbidden for other modes.
-// +kubebuilder:validation:XValidation:rule="has(self.allowList) == (has(self.mode) && self.mode == 'AllowList')",message="allowList is required only when mode is AllowList"
-// +kubebuilder:validation:XValidation:rule="has(self.denyList) == (has(self.mode) && self.mode == 'DenyList')",message="denyList is required only when mode is DenyList"
 type HTTPCalloutHeaders struct {
-	// Mode selects which headers are sent. Defaults to None.
+	// Enabled sends headers when true. Defaults to false. When false, Filter
+	// has no effect. Request metadata such as authority, path, and content
+	// type remains part of the invocation regardless of this setting.
 	// +optional
-	// +kubebuilder:default:=None
-	Mode HTTPCalloutHeaderMode `json:"mode,omitempty"`
-	// AllowList names the only headers sent when Mode is AllowList. Header
-	// names are case-insensitive.
+	// +kubebuilder:default:=false
+	Enabled bool `json:"enabled,omitempty"`
+	// Filter selects the headers sent when Enabled is true. Omission sends
+	// every header, including credentials and cookies. When present, exactly
+	// one non-empty list must be set; an empty filter is invalid.
+	// +optional
+	Filter *HTTPCalloutHeaderFilter `json:"filter,omitempty"`
+}
+
+// HTTPCalloutHeaderFilter selects headers for disclosure. Exactly one list
+// must be set. The CRD does not enforce this cross-field constraint.
+type HTTPCalloutHeaderFilter struct {
+	// AllowList names the only headers sent. Header names are case-insensitive.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
@@ -421,8 +411,8 @@ type HTTPCalloutHeaders struct {
 	// +kubebuilder:validation:items:MaxLength=256
 	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9!#$%&'*+\-.^_|~]+$`
 	AllowList []string `json:"allowList,omitempty"`
-	// DenyList names the headers omitted when Mode is DenyList. Header names
-	// are case-insensitive.
+	// DenyList names the headers omitted. Header names are case-insensitive.
+	// Credentials are sent unless explicitly excluded.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
@@ -432,25 +422,43 @@ type HTTPCalloutHeaders struct {
 	DenyList []string `json:"denyList,omitempty"`
 }
 
+// HTTPCalloutBody configures complete-body disclosure for one callout phase.
+type HTTPCalloutBody struct {
+	// Enabled buffers and sends the complete body when true. The callout then
+	// runs after buffering, instead of at the headers phase. Defaults to false.
+	// An empty body is valid. Bodies must be valid UTF-8 and fit within
+	// MaxBytes; they are never truncated. In the response phase, only the
+	// response body is sent.
+	// +optional
+	// +kubebuilder:default:=false
+	Enabled bool `json:"enabled,omitempty"`
+	// MaxBytes limits the body disclosed in this phase. Defaults to 1 MiB and
+	// may not exceed 8 MiB. Oversized content is an execution failure, not
+	// truncated input. This has no effect when Enabled is false and does not
+	// configure Envoy's buffering limit or the provider's decision-response
+	// size limit.
+	// +optional
+	// +kubebuilder:default:=1048576
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=8388608
+	MaxBytes int64 `json:"maxBytes,omitempty"`
+}
+
 // HTTPCalloutPhase configures one request or response callout. The enclosing
 // field's presence enables the phase; an empty object invokes the provider with
 // metadata only. Omitting the field disables that phase.
 type HTTPCalloutPhase struct {
-	// Headers controls header disclosure. Omission is equivalent to mode None.
+	// Headers controls header disclosure. Omission disables header disclosure.
 	// +optional
 	Headers *HTTPCalloutHeaders `json:"headers,omitempty"`
-	// Body buffers and sends the complete body when true. The callout then
-	// runs after buffering, instead of at the headers phase. Defaults to false.
-	// Bodies must be valid UTF-8 and fit within MaxBodyBytes; they are never
-	// truncated. In the response phase, only the response body is sent.
+	// Body controls body disclosure. Omission disables body disclosure.
 	// +optional
-	// +kubebuilder:default:=false
-	Body bool `json:"body,omitempty"`
+	Body *HTTPCalloutBody `json:"body,omitempty"`
 }
 
 // HTTPCalloutAction delegates request or response processing to a named HTTP
-// callout provider. At least one phase must be enabled.
-// +kubebuilder:validation:XValidation:rule="has(self.request) || has(self.response)",message="at least one of request or response must be set"
+// callout provider. At least one phase must be enabled; the CRD does not enforce
+// this cross-field constraint.
 type HTTPCalloutAction struct {
 	// Provider identifies the HTTP callout provider. The provider owns the
 	// URL, timeout, TLS, and decision-response size limit. A missing, unavailable,
@@ -464,15 +472,6 @@ type HTTPCalloutAction struct {
 	// includes request correlation metadata, but no request headers or body.
 	// +optional
 	Response *HTTPCalloutPhase `json:"response,omitempty"`
-	// MaxBodyBytes limits each request or response body disclosed to the
-	// provider. Defaults to 1 MiB and may not exceed 8 MiB. Oversized content
-	// is an execution failure, not truncated input. This does not configure
-	// Envoy's buffering limit or the provider's decision-response size limit.
-	// +optional
-	// +kubebuilder:default:=1048576
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=8388608
-	MaxBodyBytes int64 `json:"maxBodyBytes,omitempty"`
 	// FailStrategy controls execution failures, including provider lookup,
 	// transport, timeout, body-disclosure, and protocol errors. Defaults to
 	// Block. Allow and Ignore skip the failed callout's mutations and continue.
@@ -635,9 +634,12 @@ type SecurityRuleActions struct {
 	//         name: content-scanner
 	//       request:
 	//         headers:
-	//           mode: AllowList
-	//           allowList: [content-type, x-request-id]
-	//         body: true
+	//           enabled: true
+	//           filter:
+	//             allowList: [content-type, x-request-id]
+	//         body:
+	//           enabled: true
+	//           maxBytes: 1048576
 	//       failStrategy: Block
 	// +optional
 	HTTPCallout *HTTPCalloutAction `json:"httpCallout,omitempty"`

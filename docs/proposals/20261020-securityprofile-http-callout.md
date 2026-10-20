@@ -128,10 +128,11 @@ spec:
             name: auth-interceptor
           request:
             headers:
-              mode: AllowList
-              allowList: [authorization, x-request-id]
-            body: false
-          maxBodyBytes: 1048576
+              enabled: true
+              filter:
+                allowList: [authorization, x-request-id]
+            body:
+              enabled: false
           failStrategy: Block
 ```
 
@@ -175,7 +176,7 @@ provider in the serving EPE's registry.
 
 The operator owns the provider URL, timeout, and TLS settings. Decision-response
 size limits also belong to the provider/runtime side, not to the profile's
-`maxBodyBytes`. In the companion
+`body.maxBytes`. In the companion
 [Agentio PR #93](https://github.com/openkruise/agentio/pull/93), that limit is
 configured by `HTTP_CALLOUT_MAX_RESPONSE_BYTES` at client initialization rather
 than by an EPEConfig field.
@@ -195,31 +196,69 @@ metadata-only invocation.
   metadata but no request headers or request body.
 - Each phase independently configures `headers` and `body`.
 
-Omitting `headers` is equivalent to `mode: None`:
+Both `headers` and `body` are optional configuration objects with an `enabled`
+boolean defaulting to `false`. Omitting the object, specifying `{}`, or setting
+`enabled: false` disables that data disclosure. Other settings have no runtime
+effect while disclosure is disabled; ordinary schema constraints still apply.
+Enabling body disclosure does not require the original body to be non-empty.
 
-| Mode | Disclosed headers | Required list |
-|---|---|---|
-| `None` (default) | No headers | Neither list is allowed. |
-| `All` | All headers, including credentials and cookies | Neither list is allowed. |
-| `AllowList` | Only named headers | Non-empty `allowList`; no `denyList`. |
-| `DenyList` | All headers except named headers | Non-empty `denyList`; no `allowList`. |
+| Header configuration | Disclosed headers |
+|---|---|
+| Omitted or `enabled: false` | No headers. |
+| `enabled: true`, no `filter` | All headers, including credentials and cookies. |
+| `enabled: true`, `filter.allowList` | Only named headers. |
+| `enabled: true`, `filter.denyList` | All headers except named headers. |
 
-Header matching is case-insensitive. Lists use set semantics and validate header
-names against the API's supported HTTP token pattern, with lengths of 1–256
-characters. `None` does not remove invocation metadata such as authority, path,
-and content type. `DenyList` can still disclose credentials unless explicitly
-excluded.
+When `filter` is present, exactly one non-empty list is expected. An empty
+`filter: {}` or a filter containing both lists is outside the supported contract.
+The CRD has no CEL validation for this cross-field constraint; runtime
+integration must validate it. Individual lists retain schema validation for
+non-empty contents and header names. Header names are case-insensitive; lists
+use set semantics and the API's supported HTTP token pattern, with name lengths
+of 1–256 characters. Disabling headers does not remove invocation metadata such
+as authority, path, and content type. A denylist can still disclose credentials
+unless explicitly excluded.
 
-`body` is a boolean defaulting to `false`. When true, the runtime buffers and
-sends the complete body for that phase, so the callout runs after buffering
-instead of at the headers phase. Bodies must be valid UTF-8. Response-phase body
-disclosure sends only the response body.
+When `body.enabled: true`, the runtime buffers and sends the complete body for
+that phase, so the callout runs after buffering instead of at the headers phase.
+Bodies must be valid UTF-8. Response-phase body disclosure sends only the
+response body.
 
-`maxBodyBytes` defaults to 1 MiB (1048576 bytes), accepts values from 1 through
-8 MiB (8388608 bytes), and limits each disclosed request or response body
-separately. Oversized or invalid bodies cause an execution failure; they are
+`body.maxBytes` defaults to 1 MiB (1048576 bytes) and accepts values from 1 through
+8 MiB (8388608 bytes). Request and response phases configure their limits
+independently. Oversized or invalid bodies cause an execution failure; they are
 never truncated for inspection. This setting does not configure Envoy's
 buffering limit or the size of the provider's decision response.
+
+For example, a body inspector can enable both phases with different limits:
+
+```yaml
+httpCallout:
+  provider:
+    name: content-inspector
+  request:
+    headers:
+      enabled: true
+      filter:
+        allowList: [content-type, x-request-id]
+    body:
+      enabled: true
+      maxBytes: 1048576
+  response:
+    headers:
+      enabled: true
+      filter:
+        allowList: [content-type]
+    body:
+      enabled: true
+      maxBytes: 4194304
+  failStrategy: Block
+```
+
+This structure separates enabling disclosure from configuring it. Future CEL
+header filtering could add a mutually exclusive filter branch, and future body
+streaming could add a processing mode. Neither capability is defined or enabled
+by this API change; each requires its own runtime semantics and implementation.
 
 ### Action Ordering and Failure Behavior
 
@@ -247,8 +286,11 @@ failure. This API does not prescribe an error response status or body.
 
 The PR adds the Go API types and action field, regenerates DeepCopy methods,
 and adds matching OpenAPI schemas to both profile CRDs. Schema validation
-requires a provider name, at least one phase, valid enum values and size bounds,
-and agreement between each header mode and its list.
+requires a provider name and enforces field types, failure-strategy enum values,
+list constraints, and size bounds. No CEL validation is added for this action.
+The at-least-one-phase and exactly-one-filter-branch requirements are documented
+contracts for runtime integration to enforce, not CRD admission checks. This PR
+does not add a webhook or runtime validator.
 
 EPEConfig provider registration and configuration watching are separate work in
 Agentio PR #93. Runtime conversion and production filter registration must
@@ -261,7 +303,7 @@ registration alone establishes that the action is executing.
   header allowlist and enable bodies only for providers trusted with that data.
 - **Latency and buffering cost:** operators configure provider timeouts; policy
   authors limit disclosed bodies. Deployment buffering limits must be aligned
-  separately, since `maxBodyBytes` does not change them.
+  separately, since `body.maxBytes` does not change them.
 - **Provider outages:** `Block` is the default. Choosing `Allow` or `Ignore`
   explicitly accepts continuing without the failed inspection or its mutations.
 - **Partial deployment:** install compatible runtime support before relying on
@@ -293,6 +335,14 @@ their existing behavior. This design replaces the unreleased
 Experimental users must move connection settings to the provider configuration
 and update the action; no compatibility alias is introduced.
 
+The earlier unreleased callout shape is also replaced: `headers.mode: None`
+becomes omitted headers or `enabled: false`; `All` becomes `enabled: true`
+without a filter; `AllowList` and `DenyList` become `enabled: true` with the
+corresponding list under `filter`. Replace `body: true/false` with
+`body.enabled: true/false`, and move action-level `maxBodyBytes` into each
+configured phase's `body.maxBytes`. This is a pre-release API revision, not a
+conversion path for released objects.
+
 Install the updated CRDs and compatible Agentio runtime, configure the named
 provider, and then apply profiles using `httpCallout`. Verify request and
 response behavior before depending on enforcement. Before rolling back to a
@@ -306,8 +356,11 @@ API package with `go test ./api/v1alpha1`, and check `git diff --check`. API
 package compilation alone does not exercise admission or runtime behavior.
 
 Schema validation coverage should include both profile kinds: missing provider
-or name, invalid names, neither phase present, empty phases, each header mode,
-missing or conflicting lists, defaults, and body-size boundaries.
+or name, invalid names, header filters, disclosure defaults, body-size
+boundaries, and rejection of the old boolean body shape. Confirm that this
+action's schema contains no CEL rules and that admission does not enforce the
+phase-presence or filter-exclusivity contracts. Follow-up runtime validation
+must reject missing phases and empty or conflicting filter branches.
 
 Follow-up runtime integration must cover request-only and response-only calls,
 phase-specific disclosure, UTF-8 and oversized-body failures, missing and

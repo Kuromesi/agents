@@ -16,11 +16,21 @@ see-also:
 
 ## Summary
 
-Add `actions.httpCallout` to `SecurityProfile` and `GlobalSecurityProfile` so
-matching rules can delegate request or response processing to a named HTTP
-provider. The provider can return mutations or an immediate response. Policy
-authors choose the phases, disclosed headers and bodies, and failure behavior;
-operators manage provider connections separately in Agentio's EPEConfig.
+Add `actions.httpCallout` to `SecurityProfile` and `GlobalSecurityProfile`,
+providing a gateway interceptor mechanism for invoking user-owned business logic
+during request or response processing.
+
+Users can reuse their existing authentication and credential-injection workflows
+through an HTTP service. The service receives the configured request context and
+returns the changes to apply, or an immediate response when processing should
+stop. EPE handles the Envoy ext_proc integration, coordinates processing phases,
+and applies the returned changes.
+
+External integrators do not need to implement an ext_proc server or manage its
+streaming protocol and processing state. They can focus on their business logic
+and the modifications they want the gateway to make. Policy authors choose the
+phases, disclosed headers and bodies, and failure behavior; operators manage
+provider connections separately in Agentio's EPEConfig.
 
 This proposal describes the API contract introduced by
 [agents PR #882](https://github.com/openkruise/agents/pull/882). Installing the
@@ -30,17 +40,36 @@ pipeline before profiles using the action can enforce policy.
 
 ## Motivation
 
-Content scanning and organization-specific request checks need information from
-HTTP traffic and must be able to affect its outcome. An asynchronous audit
-webhook cannot implement these checks because it does not change the response.
-Embedding a provider URL and connection settings in every rule would duplicate
-operator configuration and couple policy updates to endpoint or TLS changes.
+Users may already have services that authenticate requests, obtain credentials,
+and inject those credentials before forwarding traffic upstream. They need a
+way to invoke this existing logic from the gateway without rebuilding it as a
+built-in action.
 
-A named provider separates the connection lifecycle from the policy's decision
-about which traffic and data to send.
+For example, a user's service may inspect an incoming request, validate its
+caller using an existing authentication system, retrieve an upstream credential,
+and return instructions to replace the request's `Authorization` header. The
+gateway then applies the modification and continues processing.
+
+Direct integration with Envoy ext_proc requires the service to participate in a
+bidirectional gRPC processing protocol. In addition to its business logic, the
+implementation must handle processing messages across request and response
+phases and produce the corresponding protocol responses. This adds integration
+work unrelated to authentication or credential injection.
+
+HTTP callouts provide a simpler integration boundary: receive an HTTP
+invocation, execute business logic, and return a decision describing the
+required modifications. EPE owns the interaction with ext_proc and translates
+that decision into gateway behavior. Content scanning is another use case for
+this same mechanism.
+
+Named providers separate operator-managed connection settings from per-rule
+configuration. Operators manage endpoints, timeouts, and TLS, while policy
+authors choose when to invoke a provider and which data to disclose.
 
 ### Goals
 
+- Reuse existing authentication and credential-injection logic through HTTP calls.
+- Keep ext_proc protocol and processing-state management inside EPE.
 - Support request-only, response-only, and combined callouts in both profile kinds.
 - Reuse an operator-managed provider without exposing connection settings in rules.
 - Make header and body disclosure explicit, with metadata-only calls by default.
@@ -60,12 +89,18 @@ about which traffic and data to send.
 
 ### User Stories
 
-1. A platform operator registers a content scanner once and updates its endpoint,
-   timeout, or TLS configuration independently of the profiles using it.
-2. A policy author sends a request body and selected headers to that scanner,
-   blocking traffic if inspection cannot complete.
-3. A policy author inspects an upstream response without also disclosing the
-   original request headers or body.
+1. **Reuse an existing authentication and credential-injection workflow.**
+   A user connects an existing service through an HTTP handler. The service
+   validates the caller, obtains the appropriate upstream credential, and
+   returns request-header modifications. EPE applies those modifications before
+   forwarding the request.
+2. **Implement an interceptor without learning ext_proc.**
+   An integrator writes an HTTP handler that receives request context and returns
+   modifications or an immediate response. They do not need to maintain an
+   ext_proc stream or coordinate its processing phases.
+3. **Extend interception to response processing.**
+   A user configures a response-phase callout to run custom logic on the upstream
+   response, with independently configured header and body disclosure.
 
 ### API and Example
 
@@ -77,38 +112,58 @@ matching rules, and profile priorities retain their semantics.
 apiVersion: agents.kruise.io/v1alpha1
 kind: SecurityProfile
 metadata:
-  name: inspect-model-traffic
+  name: inject-upstream-credentials
   namespace: default
 spec:
   selector:
     matchLabels:
       app: sandbox
   rules:
-    - name: inspect-content
+    - name: authenticate-and-inject
       match:
         - domains: [api.example.com]
       actions:
         httpCallout:
           provider:
-            name: content-scanner
+            name: auth-interceptor
           request:
             headers:
               mode: AllowList
-              allowList: [content-type, x-request-id]
-            body: true
-          response:
-            headers:
-              mode: AllowList
-              allowList: [content-type]
-            body: true
+              allowList: [authorization, x-request-id]
+            body: false
           maxBodyBytes: 1048576
           failStrategy: Block
 ```
 
 The example requires a corresponding HTTP callout provider named
-`content-scanner` in the serving EPE configuration. For a
+`auth-interceptor` in the serving EPE configuration. It explicitly discloses the
+incoming authorization header to that trusted service for authentication, while
+leaving body disclosure disabled. The service returns the upstream credential
+as a request-header modification. The response phase is omitted because this
+workflow only modifies the outgoing request. For a
 `GlobalSecurityProfile`, use that kind and omit `metadata.namespace`; the action
 shape is identical.
+
+### Integration Boundary
+
+The profile fields configure when the gateway invokes the service and which
+traffic data it sends. The external service implements Agentio's
+[HTTP Invocation/Decision contract](https://github.com/openkruise/agentio/blob/master/extensions/epe/pkg/filters/httpcallout/protocol.go)
+to describe the changes it wants applied. An existing service can expose a
+handler or adapter for that contract; it does not need to implement ext_proc.
+
+For credential injection, the handler receives the disclosed authentication
+context, runs its existing authentication and credential lookup logic, and
+returns a continue decision with an authorization-header replacement. EPE
+applies that decision and continues the action chain. A handler can instead
+return an immediate response to stop processing, for example when authentication
+fails. If `TokenTransformation` is also configured, it runs after the callout;
+policy authors must account for that ordering when both actions modify credentials.
+
+HTTP callouts expose a phase-based integration, rather than every ext_proc
+capability. EPE manages the ext_proc protocol interaction. When body disclosure
+is enabled, the complete body is buffered subject to the configured limit;
+streaming or chunk-by-chunk processing is outside this proposal's scope.
 
 ### Provider Reference and Ownership
 
@@ -214,15 +269,20 @@ registration alone establishes that the action is executing.
 
 ## Alternatives
 
-1. **Inline URL, timeout, and TLS settings per rule.** This duplicates connection
+1. **Implement an ext_proc service directly.** This exposes the full processing
+  protocol but requires external integrators to handle the stream and phase
+  interactions. HTTP callouts keep that work in EPE and let integrators focus
+  on business decisions and returned modifications.
+
+2. **Inline URL, timeout, and TLS settings per rule.** This duplicates connection
    configuration and couples endpoint rotation to policy edits. Named providers
    keep those settings with their operator owner.
-2. **Reuse audit webhooks.** Audit is asynchronous and cannot block or mutate the
+3. **Reuse audit webhooks.** Audit is asynchronous and cannot block or mutate the
    inspected exchange.
-3. **Add namespace and kind to the reference.** The current provider registry is
+4. **Add namespace and kind to the reference.** The current provider registry is
    owned by the serving EPE, and the action already determines the required kind.
    Those fields would imply lookup semantics this API does not provide.
-4. **Truncate oversized bodies.** Partial inspection could miss relevant content.
+5. **Truncate oversized bodies.** Partial inspection could miss relevant content.
    Complete-body disclosure instead fails according to the selected strategy.
 
 ## Upgrade Strategy

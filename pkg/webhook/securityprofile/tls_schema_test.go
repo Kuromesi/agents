@@ -88,6 +88,7 @@ func TestTLSCRDSchema(t *testing.T) {
 			}
 			for _, tc := range []struct{ name, match, actions, wantError string }{
 				{"deny", `[{"domains":["blocked.example.com"],"ports":[443,8443]}]`, `{"tls":{"action":"Deny"}}`, ""},
+				{"passthrough", `[{"domains":["private.example.com"],"ports":[443]}]`, `{"tls":{"action":"Passthrough"}}`, ""},
 				{"unrestricted ports", `[{"domains":["*"]}]`, `{"tls":{"action":"Deny"}}`, ""},
 				{"empty ports", `[{"domains":["*.example.com"],"ports":[]}]`, `{"tls":{"action":"Deny"}}`, ""},
 				{"port boundaries", `[{"domains":["a"],"ports":[1,65535]}]`, `{"tls":{"action":"Deny"}}`, ""},

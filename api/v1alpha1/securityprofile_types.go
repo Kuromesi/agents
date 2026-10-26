@@ -717,18 +717,22 @@ type AuditAction struct {
 }
 
 // TLSActionType identifies a TLS connection action.
-// +kubebuilder:validation:Enum=Deny
+// +kubebuilder:validation:Enum=Deny;Passthrough
 type TLSActionType string
 
 const (
 	// TLSActionDeny rejects the connection without terminating TLS.
 	TLSActionDeny TLSActionType = "Deny"
+	// TLSActionPassthrough forwards the connection without decrypting TLS.
+	TLSActionPassthrough TLSActionType = "Passthrough"
 )
 
 // TLSAction configures an explicit TLS connection rule.
 type TLSAction struct {
 	// Action is required and has no default. Deny rejects the connection;
 	// it does not promise an HTTP response or a specific TLS alert.
+	// Passthrough forwards without decryption or HTTP rule processing.
+	// Both actions stop further TLS rule selection.
 	Action TLSActionType `json:"action"`
 }
 
@@ -841,8 +845,8 @@ type HeaderValue struct {
 // SecurityRule is one entry in the ordered rule chain.
 //
 // During TLS connection selection, the first matching rule decides: explicit
-// TLS rules allow only domains and ports in each match entry, and deny matched
-// connections. HTTP rules select TLS termination when the matching entry
+// TLS rules allow only domains and ports in each match entry, and deny or
+// pass through matched connections. HTTP rules select TLS termination when the matching entry
 // has no schemes or includes https. HTTP-only conditions are deferred.
 // During HTTP processing, every matching HTTP rule executes until an action terminates the
 // request. Mutations from earlier rules are preserved by Bypass and discarded

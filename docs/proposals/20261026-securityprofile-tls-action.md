@@ -12,7 +12,7 @@ status: provisional
 
 ## Summary and delivery scope
 
-Add `spec.rules[].actions.tls.action: Deny` to SecurityProfile and
+Add `spec.rules[].actions.tls.action` with `Deny` and `Passthrough` to SecurityProfile and
 GlobalSecurityProfile. Both use the same SecurityProfileSpec. Presence of
 `actions.tls` identifies an explicit TLS connection rule; its absence keeps a
 rule in the existing HTTP pipeline.
@@ -21,7 +21,7 @@ This change delivers the Go API, generated deepcopy and CRD schemas, an
 [example](../../config/samples/agents_v1alpha1_securityprofile_tls.yaml), and
 schema tests. Agentio must consume the API and implement connection selection
 and enforcement before these policies can reject connections. Installing these
-CRDs alone does not enforce TLS Deny.
+CRDs alone does not enforce TLS Deny or Passthrough.
 
 The contract below adopts proposal A (declaration order). Proposal B (most
 specific match) remains an alternative, not an implemented mode. No mode field
@@ -38,9 +38,15 @@ rules:
     actions:
       tls:
         action: Deny
+  - name: passthrough-private-tls
+    match:
+      - domains: [private.example.com]
+    actions:
+      tls:
+        action: Passthrough
 ```
 
-`action` is required, has no default, and only accepts `Deny`. `tls: {}`, an
+`action` is required, has no default, and accepts `Deny` or `Passthrough`. `tls: {}`, an
 empty action, and unknown actions fail CRD schema validation. `Terminate` is an
 internal connection-selection result, not a public action.
 
@@ -89,7 +95,9 @@ namespace. Within each profile, preserve rule and match declaration order.
 Evaluate visible SNI and original destination port. The first matching entry
 decides connection behavior:
 
-- An explicit TLS rule selects Deny and rejects the whole connection.
+- An explicit TLS Deny rule rejects the whole connection.
+- An explicit TLS Passthrough rule forwards the connection without decryption
+  or HTTP rule processing. No later TLS rules are evaluated.
 - An ordinary HTTP rule selects Terminate if that match entry has no schemes
   or includes https. Paths, methods, headers, and query parameters do not limit
   this handshake-stage selection.
@@ -105,12 +113,15 @@ rules never execute in the HTTP phase.
 
 Thus Deny for `blocked.example.com` followed by HTTP `*.example.com` denies
 that host. Reversing them selects Terminate instead, even if the HTTP rule has
-a `/health` path condition. There is no fixed Deny priority.
+a `/health` path condition. There is no fixed Deny priority. Similarly, an
+explicit Passthrough for `private.example.com` before HTTP `*.example.com`
+keeps that connection encrypted; reversing them selects Terminate.
 
 ### Gateway exclusions
 
 `tlsTermination.excludeHosts` forbids termination, not Deny. A selected Deny
-still rejects an excluded host. A selected Terminate for an excluded host
+still rejects an excluded host. A selected Passthrough always forwards without
+decryption, regardless of exclusions. A selected Terminate for an excluded host
 becomes passthrough without evaluating later TLS rules. No match preserves
 existing default and exclusion behavior.
 
@@ -144,7 +155,7 @@ Ties across profiles use existing profile order. Equivalent candidates within
 one profile with overlapping ports and different actions reject that profile
 version; equal actions keep source order for attribution. Specificity never
 crosses administrator/Sandbox source-group boundaries. Deny has no fixed
-priority: exact Terminate could override wildcard Deny. This alternative and
+priority: exact Terminate or Passthrough could override wildcard Deny. This alternative and
 its conflict checks are not part of this delivery.
 
 ## Non-goals

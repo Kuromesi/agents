@@ -248,8 +248,8 @@ spec:
                     SecurityRule is one entry in the ordered rule chain.
 
                     During TLS connection selection, the first matching rule decides: explicit
-                    TLS rules allow only domains and ports in each match entry, and deny matched
-                    connections. HTTP rules select TLS termination when the matching entry
+                    TLS rules allow only domains and ports in each match entry, and deny or
+                    pass through matched connections. HTTP rules select TLS termination when the matching entry
                     has no schemes or includes https. HTTP-only conditions are deferred.
                     During HTTP processing, every matching HTTP rule executes until an action terminates the
                     request. Mutations from earlier rules are preserved by Bypass and discarded
@@ -760,8 +760,11 @@ spec:
                               description: |-
                                 Action is required and has no default. Deny rejects the connection;
                                 it does not promise an HTTP response or a specific TLS alert.
+                                Passthrough forwards without decryption or HTTP rule processing.
+                                Both actions stop further TLS rule selection.
                               enum:
                               - Deny
+                              - Passthrough
                               type: string
                           required:
                           - action
